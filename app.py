@@ -14,11 +14,10 @@ import re
 from nltk.corpus import stopwords
 import nltk
 
-nltk.download('stopwords')
 
-# Configure Google API Key
-load_dotenv()
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+# Directly configure Google API Key
+GOOGLE_API_KEY = "AIzaSyCIOymb6EfQkNbOhQyp3MmhR5Ks8qIIrxY"  # Replace with your actual API key
+genai.api_key = GOOGLE_API_KEY
 # Function to extract text from PDF files with better handling
 def get_pdf_text(pdf_docs):
     text = ""
