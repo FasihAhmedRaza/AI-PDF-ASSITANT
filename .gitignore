@@ -1,0 +1,9 @@
+# Ignore virtual environment
+venv/
+myenv/
+
+# Ignore FAISS index (optional, if not needed)
+faiss/
+
+# Ignore system files
+.DS_Store
