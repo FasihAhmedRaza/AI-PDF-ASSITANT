@@ -4,12 +4,11 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 import google.generativeai as genai
-from langchain_community.vectorstores import Chroma  # Updated import path for Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
+from langchain.schema import Document
 from dotenv import load_dotenv
-import tempfile
 import re
 from nltk.corpus import stopwords
 import nltk
@@ -18,7 +17,7 @@ import nltk
 st.set_page_config(page_title="AI PDF ASSISTANT", page_icon="📄", layout="wide")
 
 # Directly configure Google API Key
-GOOGLE_API_KEY = "AIzaSyCIOymb6EfQkNbOhQyp3MmhR5Ks8qIIrxY"  # Replace with your actual API key
+GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY"  # Replace with your actual API key
 genai.api_key = GOOGLE_API_KEY
 
 # Function to extract text from PDF files with better handling
@@ -40,16 +39,6 @@ def get_text_chunks(text):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
     chunks = text_splitter.split_text(text)
     return chunks
-
-# Function to create and save a Chroma vector store from text chunks
-def get_vector_store(text_chunks):
-    try:
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-        vector_store = Chroma.from_texts(text_chunks, embedding=embeddings, persist_directory="chroma_index")
-        vector_store.persist()
-    except Exception as e:
-        st.error(f"An error occurred while creating the vector store: {str(e)}")
-
 
 # Function to create a conversational chain using a custom prompt and Gemini model
 def get_conversational_chain():
@@ -84,19 +73,15 @@ def preprocess_question(question):
     
     return question
 
-# Modify user_input function to preprocess the question
-def user_input(user_question):
+# Modify user_input function to preprocess the question and use text chunks directly
+def user_input(user_question, text_chunks):
     try:
-        # Initialize embeddings with a valid model name
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-        
-        vector_store = Chroma(persist_directory="chroma_index", embedding_function=embeddings)
-        
-        docs = vector_store.similarity_search(user_question)
-        
-        if not docs:
-            st.warning("No relevant documents found in the index for your query.")
+        if not text_chunks:
+            st.warning("No text chunks are available for your query.")
             return ""
+        
+        # Convert text chunks to Document objects
+        docs = [Document(page_content=chunk) for chunk in text_chunks]
 
         chain = get_conversational_chain()
         response = chain(
@@ -104,12 +89,10 @@ def user_input(user_question):
         )
         return response["output_text"]
         
-    except FileNotFoundError:
-        st.error("Chroma index not found. Please upload and process PDF files first.")
-        return ""
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
         return ""
+
 
 # Custom CSS for enhanced UI
 def add_custom_css():
@@ -147,7 +130,7 @@ def add_custom_css():
     }
 
     /* Sidebar styling */
-    .stSidebar {
+        .stSidebar {
         background-color: #1f4f78;
     }
     .stSidebar h1 {
@@ -205,9 +188,11 @@ def main():
     # Add custom CSS for enhanced UI
     add_custom_css()
 
-    # Initialize session state for chat history if not already initialized
+    # Initialize session state for chat history and text chunks if not already initialized
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
+    if "text_chunks" not in st.session_state:
+        st.session_state.text_chunks = []
 
     # App header
     st.markdown('<h1 class="main-header">AI CHAT ASSISTANT </h1>', unsafe_allow_html=True)
@@ -216,7 +201,7 @@ def main():
     user_question = st.text_input("🔍 Ask a Question from the PDF Files")
 
     if user_question:
-        response = user_input(user_question)
+        response = user_input(user_question, st.session_state.text_chunks)
         # Update the chat history
         st.session_state.chat_history.append(
             {"question": user_question, "response": response}
@@ -268,10 +253,7 @@ def main():
                     raw_text = get_pdf_text(pdf_docs)
 
                     with st.spinner("Splitting text into chunks..."):
-                        text_chunks = get_text_chunks(raw_text)
-
-                    with st.spinner("Creating vector store..."):
-                        get_vector_store(text_chunks)
+                        st.session_state.text_chunks = get_text_chunks(raw_text)
 
                     st.success("PDFs processed successfully!")
             else:
