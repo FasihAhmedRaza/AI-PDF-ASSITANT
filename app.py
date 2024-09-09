@@ -43,11 +43,13 @@ def get_text_chunks(text):
 
 # Function to create and save a Chroma vector store from text chunks
 def get_vector_store(text_chunks):
-    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-    
-    # Specify the persistence directory when creating the Chroma vector store
-    vector_store = Chroma.from_texts(text_chunks, embedding=embeddings, persist_directory="chroma_index")
-    vector_store.persist()  # This will persist to the directory specified above
+    try:
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        vector_store = Chroma.from_texts(text_chunks, embedding=embeddings, persist_directory="chroma_index")
+        vector_store.persist()
+    except Exception as e:
+        st.error(f"An error occurred while creating the vector store: {str(e)}")
+
 
 # Function to create a conversational chain using a custom prompt and Gemini model
 def get_conversational_chain():
