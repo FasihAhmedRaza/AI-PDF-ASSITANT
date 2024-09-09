@@ -12,12 +12,27 @@ from dotenv import load_dotenv
 import tempfile
 import re
 from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+import nltk
+import arabic_reshaper
+from bidi.algorithm import get_display
+from camel_tools.tokenizers.word import simple_word_tokenize
+
 
 # Load environment variables
 load_dotenv()
-GOOGLE_API_KEY="AIzaSyCIOymb6EfQkNbOhQyp3MmhR5Ks8qIIrxY"
+
 # Configure Google API Key
-genai.api_key = GOOGLE_API_KEY
+genai.configure(api_key=os.getenv("GOOGLE_API_KEY"))
+
+# Download stopwords if not already downloaded
+nltk.download('stopwords')
+nltk.download('punkt')
+
+# Load stopwords list
+stop_words_en = set(stopwords.words('english'))
+stop_words_ar = set(stopwords.words('arabic'))
+
 
 # Function to extract text from PDF files with better handling
 def get_pdf_text(pdf_docs):
@@ -33,7 +48,6 @@ def get_pdf_text(pdf_docs):
         st.warning("No text extracted from PDF files.")
     return text
 
-
 # Function to split extracted text into chunks with dynamic chunk size
 def get_text_chunks(text):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
@@ -46,9 +60,8 @@ def get_vector_store(text_chunks):
     vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
     vector_store.save_local("faiss_index")
 
-
 # Function to create a conversational chain using a custom prompt and Gemini model
-def get_conversational_chain():
+def get_conversational_chain(language='english'):
     prompt_template = """
     Answer the question in detail using the provided context. If the answer is not available, respond with:
     "The requested information is not available within the provided PDF content. Please ask another question." 
@@ -58,7 +71,8 @@ def get_conversational_chain():
     Question:\n{question}\n
     Answer:
     """
-
+    
+    # Load a multilingual or Arabic-specific model
     model = ChatGoogleGenerativeAI(model="gemini-pro", temperature=0.3)
     prompt = PromptTemplate(
         template=prompt_template, input_variables=["context", "question"]
@@ -67,23 +81,22 @@ def get_conversational_chain():
 
     return chain
 
-
-
-# Load stopwords list
-stop_words = set(stopwords.words('english'))
-
-def preprocess_question(question):
-    # Convert to lowercase and remove common stopwords
-    question = question.lower()
-    question = ' '.join([word for word in question.split() if word not in stop_words])
-    
-    # Remove special characters
-    question = re.sub(r'[^\w\s]', '', question)
-    
-    return question
+# Preprocess text based on language
+# Preprocess text based on language
+def preprocess_text(text, language='english'):
+    text = text.lower()
+    text = re.sub(r'[^\w\s]', '', text)
+    if language == 'arabic':
+        stop_words = stop_words_ar
+        tokens = simple_word_tokenize(text)  # Tokenize using camel-tools
+    else:
+        stop_words = stop_words_en
+        tokens = word_tokenize(text)
+    filtered_tokens = [word for word in tokens if word not in stop_words]
+    return ' '.join(filtered_tokens)
 
 # Modify user_input function to preprocess the question
-def user_input(user_question):
+def user_input(user_question, language):
     try:
         # Initialize embeddings with a valid model name
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
@@ -98,7 +111,7 @@ def user_input(user_question):
             st.warning("No relevant documents found in the index for your query.")
             return ""
 
-        chain = get_conversational_chain()
+        chain = get_conversational_chain(language)
         response = chain(
             {"input_documents": docs, "question": user_question}, return_only_outputs=True
         )
@@ -208,19 +221,46 @@ def main():
     # Add custom CSS for enhanced UI
     add_custom_css()
 
-    # Initialize session state for chat history if not already initialized
+    # Initialize session state for chat history and PDF text if not already initialized
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
+    if "pdf_text" not in st.session_state:
+        st.session_state.pdf_text = ""
 
     # App header
     st.markdown('<h1 class="main-header">AI CHAT ASSISTANT </h1>', unsafe_allow_html=True)
+
+    # File uploader for PDF files
+    uploaded_files = st.file_uploader("Upload PDF files", type=["pdf"], accept_multiple_files=True)
+
+    if uploaded_files:
+        # Save uploaded files temporarily and extract text
+        temp_files = []
+        for uploaded_file in uploaded_files:
+            with tempfile.NamedTemporaryFile(delete=False) as temp_file:
+                temp_file.write(uploaded_file.read())
+                temp_files.append(temp_file.name)
+
+        # Extract text from the uploaded PDFs
+        pdf_text = get_pdf_text(temp_files)
+        st.session_state.pdf_text = pdf_text
+
+        # Split and index the text
+        if pdf_text:
+            text_chunks = get_text_chunks(pdf_text)
+            get_vector_store(text_chunks)
+            st.success("PDF files processed and indexed successfully.")
+
+    # Language selection
+    language = st.selectbox("Select Language", ["English", "Arabic"])
 
     # Input field for user's question
     user_question = st.text_input("🔍 Ask a Question from the PDF Files")
 
     if user_question:
-        response = user_input(user_question)
-        # Update the chat history
+        if language == 'Arabic':
+            user_question = preprocess_text(user_question, language='arabic')
+        response = user_input(user_question, language)
         st.session_state.chat_history.append(
             {"question": user_question, "response": response}
         )
@@ -235,47 +275,21 @@ def main():
                     f"""
     <div class="chat-container">
         <div style="display: flex; align-items: flex-end; justify-content: flex-end;">
-            <img src="https://img.icons8.com/color/48/000000/person-male.png" width="30" style="margin-right: 10px;">
+            <img src="https://img.icons8.com/color/48/000000/person-male.png" width="30" style="margin-right: 10px;"/>
             <div class="chat-bubble user-bubble">
-                <strong></strong> {chat["question"]}
+                {chat['question']}
+            </div>
+        </div>
+        <div style="display: flex; align-items: flex-start; justify-content: flex-start;">
+            <div class="chat-bubble assistant-bubble">
+                {chat['response']}
             </div>
         </div>
     </div>
     """,
                     unsafe_allow_html=True,
                 )
-                st.markdown(
-                    f"""
-                    <div class="chat-container">
-                         <div style="display: flex; align-items: flex-start;">
-            <img src="https://img.icons8.com/fluency/48/000000/chatbot.png" width="30" style="margin-right: 10px;">
-            <div class="chat-bubble assistant-bubble">
-                <strong></strong> {chat["response"]}
-            </div>
-        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.markdown("<hr>", unsafe_allow_html=True)
 
-    # Sidebar for file upload and processing
-    with st.sidebar:
-        st.title("📁 PDF Uploader")
-        st.markdown("Upload your PDF files and ask questions.")
-
-        # File uploader for PDF documents
-        pdf_docs = st.file_uploader("Upload your PDF Files", accept_multiple_files=True)
-
-        if st.button("📥 Submit & Process"):
-            with st.spinner("⏳ Processing..."):
-                # Process uploaded PDF files
-                raw_text = get_pdf_text(pdf_docs)
-                text_chunks = get_text_chunks(raw_text)
-                get_vector_store(text_chunks)
-                st.success("✅ Processing Complete")
-
-
-# Run the app
+# Run the main function
 if __name__ == "__main__":
     main()
