@@ -4,7 +4,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 import google.generativeai as genai
-from langchain.vectorstores import Chroma
+from langchain_community.vectorstores import Chroma  # Updated import path for Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
@@ -13,13 +13,14 @@ import tempfile
 import re
 from nltk.corpus import stopwords
 import nltk
-# Load environment variables
-load_dotenv()
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")  # Ensure you have this in a .env file
+
+# Set the page config as the first Streamlit command
+st.set_page_config(page_title="AI PDF ASSISTANT", page_icon="📄", layout="wide")
+
+# Directly configure Google API Key
+GOOGLE_API_KEY = "AIzaSyCIOymb6EfQkNbOhQyp3MmhR5Ks8qIIrxY"  # Replace with your actual API key
 genai.api_key = GOOGLE_API_KEY
 
-# Download nltk stopwords if necessary
-nltk.download('stopwords')
 # Function to extract text from PDF files with better handling
 def get_pdf_text(pdf_docs):
     text = ""
@@ -33,17 +34,6 @@ def get_pdf_text(pdf_docs):
     if not text:
         st.warning("No text extracted from PDF files.")
     return text
-
-def test_embeddings():
-    try:
-        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-        st.write("Embeddings initialized successfully!")
-    except Exception as e:
-        st.error(f"Failed to initialize embeddings: {str(e)}")
-
-# Call this function in your app for debugging
-test_embeddings()
-
 
 # Function to split extracted text into chunks with dynamic chunk size
 def get_text_chunks(text):
@@ -210,8 +200,6 @@ def add_custom_css():
     """, unsafe_allow_html=True)
 
 def main():
-    st.set_page_config(page_title="AI PDF ASSISTANT", page_icon="📄", layout="wide")
-
     # Add custom CSS for enhanced UI
     add_custom_css()
 
@@ -268,19 +256,24 @@ def main():
 
     # Sidebar for file upload and processing
     with st.sidebar:
-        st.title("📁 PDF Uploader")
-        st.markdown("Upload your PDF files and ask questions.")
+        st.subheader("Upload PDF Files")
 
-        # File uploader for PDF documents
-        pdf_docs = st.file_uploader("Upload your PDF Files", accept_multiple_files=True)
+        pdf_docs = st.file_uploader("Upload your PDFs", accept_multiple_files=True)
 
-        if st.button("📥 Submit & Process"):
-            with st.spinner("⏳ Processing..."):
-                # Process uploaded PDF files
-                raw_text = get_pdf_text(pdf_docs)
-                text_chunks = get_text_chunks(raw_text)
-                get_vector_store(text_chunks)
-                st.success("✅ Processing Complete")
+        if st.button("Process PDFs"):
+            if pdf_docs:
+                with st.spinner("Extracting text..."):
+                    raw_text = get_pdf_text(pdf_docs)
+
+                    with st.spinner("Splitting text into chunks..."):
+                        text_chunks = get_text_chunks(raw_text)
+
+                    with st.spinner("Creating vector store..."):
+                        get_vector_store(text_chunks)
+
+                    st.success("PDFs processed successfully!")
+            else:
+                st.warning("Please upload one or more PDF files to process.")
 
 # Run the app
 if __name__ == "__main__":
