@@ -4,18 +4,17 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 import google.generativeai as genai
-from langchain.vectorstores import FAISS
+from langchain.vectorstores import FAISS, Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
 from dotenv import load_dotenv
-import tempfile
 import re
 from nltk.corpus import stopwords
 
 # Load environment variables
 load_dotenv()
-GOOGLE_API_KEY="AIzaSyCIOymb6EfQkNbOhQyp3MmhR5Ks8qIIrxY"
+GOOGLE_API_KEY = "AIzaSyCIOymb6EfQkNbOhQyp3MmhR5Ks8qIIrxY"
 # Configure Google API Key
 genai.api_key = GOOGLE_API_KEY
 
@@ -40,11 +39,21 @@ def get_text_chunks(text):
     chunks = text_splitter.split_text(text)
     return chunks
 
-# Function to create and save a FAISS vector store from text chunks
-def get_vector_store(text_chunks):
+
+# Function to create a FAISS or Chroma vector store from text chunks
+def get_vector_store_with_fallback(text_chunks):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-    vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
-    vector_store.save_local("faiss_index")
+
+    # Try to use FAISS
+    try:
+        vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
+        vector_store.save_local("faiss_index")
+        return vector_store, "FAISS"
+    except Exception as faiss_error:
+        st.warning(f"FAISS failed with error: {faiss_error}. Falling back to Chroma.")
+        # Fallback to Chroma
+        vector_store = Chroma.from_texts(text_chunks, embedding=embeddings)
+        return vector_store, "Chroma"
 
 
 # Function to create a conversational chain using a custom prompt and Gemini model
@@ -68,7 +77,6 @@ def get_conversational_chain():
     return chain
 
 
-
 # Load stopwords list
 stop_words = set(stopwords.words('english'))
 
@@ -82,16 +90,23 @@ def preprocess_question(question):
     
     return question
 
-# Modify user_input function to preprocess the question
+
+# Modify user_input function to preprocess the question and use FAISS or Chroma
 def user_input(user_question):
     try:
-        # Initialize embeddings with a valid model name
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-        
-        new_db = FAISS.load_local(
-            "faiss_index", embeddings, allow_dangerous_deserialization=True
-        )
-        
+
+        # Try loading FAISS, fall back to Chroma if it fails
+        try:
+            new_db = FAISS.load_local(
+                "faiss_index", embeddings, allow_dangerous_deserialization=True
+            )
+            db_type = "FAISS"
+        except Exception:
+            st.warning("FAISS index loading failed. Falling back to Chroma.")
+            new_db = Chroma(embedding=embeddings)
+            db_type = "Chroma"
+
         docs = new_db.similarity_search(user_question)
         
         if not docs:
@@ -105,11 +120,12 @@ def user_input(user_question):
         return response["output_text"]
         
     except FileNotFoundError:
-        st.error("FAISS index not found. Please upload and process PDF files first.")
+        st.error("FAISS/Chroma index not found. Please upload and process PDF files first.")
         return ""
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
         return ""
+
 
 # Custom CSS for enhanced UI
 def add_custom_css():
@@ -240,42 +256,35 @@ def main():
                 <strong></strong> {chat["question"]}
             </div>
         </div>
+        <div style="display: flex; align-items: flex-start; justify-content: flex-start;">
+            <img src="https://img.icons8.com/color/48/000000/bot.png" width="30" style="margin-right: 10px;">
+            <div class="chat-bubble assistant-bubble">
+                {chat["response"]}
+            </div>
+        </div>
     </div>
     """,
                     unsafe_allow_html=True,
                 )
-                st.markdown(
-                    f"""
-                    <div class="chat-container">
-                         <div style="display: flex; align-items: flex-start;">
-            <img src="https://img.icons8.com/fluency/48/000000/chatbot.png" width="30" style="margin-right: 10px;">
-            <div class="chat-bubble assistant-bubble">
-                <strong></strong> {chat["response"]}
-            </div>
-        </div>
-                    </div>
-                    """,
-                    unsafe_allow_html=True,
-                )
-                st.markdown("<hr>", unsafe_allow_html=True)
 
-    # Sidebar for file upload and processing
+    # Sidebar to upload PDF files
     with st.sidebar:
-        st.title("📁 PDF Uploader")
-        st.markdown("Upload your PDF files and ask questions.")
+        st.subheader("Upload PDF Files")
+        pdf_docs = st.file_uploader(
+            "Choose your PDFs", type=["pdf"], accept_multiple_files=True
+        )
+        if st.button("Process"):
+            if pdf_docs:
+                # Extract and split text from PDFs
+                with st.spinner("Processing PDF documents..."):
+                    raw_text = get_pdf_text(pdf_docs)
+                    text_chunks = get_text_chunks(raw_text)
+                    # Create a vector store with fallback (FAISS or Chroma)
+                    vector_store, db_type = get_vector_store_with_fallback(text_chunks)
+                    st.success(f"Processed PDF files using {db_type} vector store.")
+            else:
+                st.warning("Please upload at least one PDF file.")
 
-        # File uploader for PDF documents
-        pdf_docs = st.file_uploader("Upload your PDF Files", accept_multiple_files=True)
 
-        if st.button("📥 Submit & Process"):
-            with st.spinner("⏳ Processing..."):
-                # Process uploaded PDF files
-                raw_text = get_pdf_text(pdf_docs)
-                text_chunks = get_text_chunks(raw_text)
-                get_vector_store(text_chunks)
-                st.success("✅ Processing Complete")
-
-
-# Run the app
 if __name__ == "__main__":
     main()
