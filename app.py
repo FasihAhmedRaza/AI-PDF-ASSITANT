@@ -13,11 +13,13 @@ import tempfile
 import re
 from nltk.corpus import stopwords
 import nltk
-nltk.download('stopwords')
-
-# Directly configure Google API Key
-GOOGLE_API_KEY = "AIzaSyCIOymb6EfQkNbOhQyp3MmhR5Ks8qIIrxY"  # Replace with your actual API key
+# Load environment variables
+load_dotenv()
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")  # Ensure you have this in a .env file
 genai.api_key = GOOGLE_API_KEY
+
+# Download nltk stopwords if necessary
+nltk.download('stopwords')
 # Function to extract text from PDF files with better handling
 def get_pdf_text(pdf_docs):
     text = ""
@@ -31,6 +33,17 @@ def get_pdf_text(pdf_docs):
     if not text:
         st.warning("No text extracted from PDF files.")
     return text
+
+def test_embeddings():
+    try:
+        embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+        st.write("Embeddings initialized successfully!")
+    except Exception as e:
+        st.error(f"Failed to initialize embeddings: {str(e)}")
+
+# Call this function in your app for debugging
+test_embeddings()
+
 
 # Function to split extracted text into chunks with dynamic chunk size
 def get_text_chunks(text):
