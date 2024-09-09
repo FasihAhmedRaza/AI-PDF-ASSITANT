@@ -6,3 +6,4 @@ PyPDF2
 chromadb
 faiss-cpu
 langchain_google_genai
+faiss-cpu==1.7.3
