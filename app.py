@@ -4,7 +4,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 import os
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 import google.generativeai as genai
-from langchain.vectorstores import FAISS
+from langchain.vectorstores import Chroma
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
@@ -17,9 +17,8 @@ import nltk
 nltk.download('stopwords')
 
 # Configure Google API Key
-GOOGLE_API_KEY="AIzaSyCIOymb6EfQkNbOhQyp3MmhR5Ks8qIIrxY"
-genai.api_key = GOOGLE_API_KEY
-
+load_dotenv()
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 # Function to extract text from PDF files with better handling
 def get_pdf_text(pdf_docs):
     text = ""
@@ -34,19 +33,19 @@ def get_pdf_text(pdf_docs):
         st.warning("No text extracted from PDF files.")
     return text
 
-
 # Function to split extracted text into chunks with dynamic chunk size
 def get_text_chunks(text):
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
     chunks = text_splitter.split_text(text)
     return chunks
 
-# Function to create and save a FAISS vector store from text chunks
+# Function to create and save a Chroma vector store from text chunks
 def get_vector_store(text_chunks):
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
-    vector_store = FAISS.from_texts(text_chunks, embedding=embeddings)
-    vector_store.save_local("faiss_index")
-
+    
+    # Specify the persistence directory when creating the Chroma vector store
+    vector_store = Chroma.from_texts(text_chunks, embedding=embeddings, persist_directory="chroma_index")
+    vector_store.persist()  # This will persist to the directory specified above
 
 # Function to create a conversational chain using a custom prompt and Gemini model
 def get_conversational_chain():
@@ -68,8 +67,6 @@ def get_conversational_chain():
 
     return chain
 
-
-
 # Load stopwords list
 stop_words = set(stopwords.words('english'))
 
@@ -89,11 +86,9 @@ def user_input(user_question):
         # Initialize embeddings with a valid model name
         embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
         
-        new_db = FAISS.load_local(
-            "faiss_index", embeddings, allow_dangerous_deserialization=True
-        )
+        vector_store = Chroma(persist_directory="chroma_index", embedding_function=embeddings)
         
-        docs = new_db.similarity_search(user_question)
+        docs = vector_store.similarity_search(user_question)
         
         if not docs:
             st.warning("No relevant documents found in the index for your query.")
@@ -106,7 +101,7 @@ def user_input(user_question):
         return response["output_text"]
         
     except FileNotFoundError:
-        st.error("FAISS index not found. Please upload and process PDF files first.")
+        st.error("Chroma index not found. Please upload and process PDF files first.")
         return ""
     except Exception as e:
         st.error(f"An error occurred: {str(e)}")
@@ -202,7 +197,6 @@ def add_custom_css():
     </style>
     """, unsafe_allow_html=True)
 
-
 def main():
     st.set_page_config(page_title="AI PDF ASSISTANT", page_icon="📄", layout="wide")
 
@@ -275,7 +269,6 @@ def main():
                 text_chunks = get_text_chunks(raw_text)
                 get_vector_store(text_chunks)
                 st.success("✅ Processing Complete")
-
 
 # Run the app
 if __name__ == "__main__":
